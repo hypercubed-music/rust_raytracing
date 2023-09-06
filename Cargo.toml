@@ -1,0 +1,15 @@
+[package]
+name = "ray_tracing"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ultraviolet = { version = "0.9", features = [ "f64", "int" ] }
+image = "0.24"
+fltk = {version = "1.4", features = ["fltk-bundled"]}
+ndarray = "0.15"
+fastrand = "2.0"
+dyn-clone = "1.0"
+oidn = "1.4.3"
