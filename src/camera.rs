@@ -87,9 +87,9 @@ impl Camera {
     
                         let r = Ray::new(ray_origin, ray_direction, DVec3::one());
 
-                        let depth = depth_check(r , &world, self.max_depth) as f32;
+                        let depth = depth_check(r , &world, self.max_depth) as f64;
 
-                        let num_samples = (self.samples as f32 * (depth / self.max_depth as f32)).round();
+                        let num_samples = (self.samples as f64 * (depth / self.max_depth as f64)).round();
 
                         for _ in 0..num_samples as i32 {
                             let p = unit_disk_samp();
@@ -103,9 +103,9 @@ impl Camera {
                             let sample_color = ray_color(r, &world, self.max_depth);
                             pixel_color += sample_color;
                         }
-                        sub_img[(j, i, 0)] = pixel_color.x;
-                        sub_img[(j, i, 1)] = pixel_color.y;
-                        sub_img[(j, i, 2)] = pixel_color.z;
+                        sub_img[(j, i, 0)] = pixel_color.x / num_samples as f64;
+                        sub_img[(j, i, 1)] = pixel_color.y / num_samples as f64;
+                        sub_img[(j, i, 2)] = pixel_color.z / num_samples as f64;
                     }
                 }
                 sub_img
@@ -116,7 +116,7 @@ impl Camera {
         for jh in v.into_iter() {
             let sub_img:Array3<f64> = jh.join().unwrap();
             for ((x, y, z), v) in img.indexed_iter_mut() {
-                *v += sub_img[(x, y, z)] / (self.samples as f64 * THREAD_COUNT as f64);
+                *v += sub_img[(x, y, z)] / (THREAD_COUNT as f64);
             }
         }
 

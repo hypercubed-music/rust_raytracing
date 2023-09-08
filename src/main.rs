@@ -1,3 +1,5 @@
+use std::f64::consts::PI;
+
 use image::RgbImage;
 use ndarray::Array3;
 use fltk::{app, prelude::*, window::Window, image::PngImage, frame::Frame};
@@ -6,10 +8,12 @@ extern crate oidn;
 mod camera;
 mod materials;
 mod raytracing;
+mod obj_loader;
 
 use camera::Camera;
-use raytracing::{HittableList, Sphere, unit_samp};
-use ultraviolet::DVec3;
+use obj_loader::load_mesh;
+use raytracing::{HittableList, Sphere, unit_samp, Mesh};
+use ultraviolet::{DVec3, DRotor3};
 
 const WIDTH: i32 = 1920;
 const HEIGHT: i32 = 1080;
@@ -18,56 +22,61 @@ fn main() {
 
     let mut world = HittableList::new();
 
-        let mat_ground = materials::Lambertian{albedo: DVec3::new(0.5, 0.5, 0.5)};
-        world.push(Box::new(Sphere{center: DVec3::new(0.0, -1000.0, 0.0), radius: 1000.0, mat:Box::new(mat_ground)}));
-    
-        for a in -11..11 {
-            for b in -11..11 {
-                let choose_mat = fastrand::f64();
-                let center = DVec3::new(a as f64 + 0.9 * fastrand::f64(), 0.2, b as f64 + 0.9 * fastrand::f64());
-                if (center - DVec3::new(4.0, 0.2, 0.0)).mag() > 0.9 {
-                    if choose_mat < 0.8 {
-                        let albedo = unit_samp();
-                        let sphere_mat = materials::Lambertian{albedo};
-                        world.push(
-                            Box::new(Sphere{center, radius:0.2, mat:Box::new(sphere_mat)})
-                        );
-                    } else if choose_mat < 0.8 {
-                        let albedo = unit_samp();
-                        let fuzz = fastrand::f64() * 0.5;
-                        let sphere_mat = materials::Metal{albedo, fuzz};
-                        world.push(
-                            Box::new(Sphere{center, radius:0.2, mat:Box::new(sphere_mat)})
-                        );
-                    } else {
-                        let sphere_mat = materials::Dielectric{ior:1.5};
-                        world.push(
-                            Box::new(Sphere{center, radius:0.2, mat:Box::new(sphere_mat)})
-                        );
-                    }
+    let mat_ground = materials::Lambertian{albedo: DVec3::new(0.5, 0.5, 0.5)};
+    world.push(Box::new(Sphere{center: DVec3::new(0.0, -1000.0, 0.0), radius: 1000.0, mat:Box::new(mat_ground)}));
+
+    for a in -11..11 {
+        for b in -11..11 {
+            let choose_mat = fastrand::f64();
+            let center = DVec3::new(a as f64 + 0.9 * fastrand::f64(), 0.2, b as f64 + 0.9 * fastrand::f64());
+            if (center - DVec3::new(4.0, 0.2, 0.0)).mag() > 0.9 {
+                if choose_mat < 0.8 {
+                    let albedo = unit_samp();
+                    let sphere_mat = materials::Lambertian{albedo};
+                    world.push(
+                        Box::new(Sphere{center, radius:0.2, mat:Box::new(sphere_mat)})
+                    );
+                } else if choose_mat < 0.8 {
+                    let albedo = unit_samp();
+                    let fuzz = fastrand::f64() * 0.5;
+                    let sphere_mat = materials::Metal{albedo, fuzz};
+                    world.push(
+                        Box::new(Sphere{center, radius:0.2, mat:Box::new(sphere_mat)})
+                    );
+                } else {
+                    let sphere_mat = materials::Dielectric{ior:1.5};
+                    world.push(
+                        Box::new(Sphere{center, radius:0.2, mat:Box::new(sphere_mat)})
+                    );
                 }
             }
         }
+    }
 
-        let mat1 = materials::Emissive{color:DVec3::new(1.0, 1.0, 1.0),strength:10.0};
-        world.push(
-            Box::new(Sphere{center:DVec3::new(0.0, 1.0, 0.0), radius:1.0, mat:Box::new(mat1)})
-        );
+    let mat1 = materials::Emissive{color:DVec3::new(1.0, 1.0, 1.0),strength:20.0};
+    world.push(
+        Box::new(Sphere{center:DVec3::new(2.0, 3.0, -1.0), radius:1.0, mat:Box::new(mat1)})
+    );
 
-        let mat2 = materials::Lambertian{albedo:DVec3::new(0.4, 0.2, 0.1)};
-        world.push(
-            Box::new(Sphere{center:DVec3::new(-4.0, 1.0, 0.0), radius:1.0, mat:Box::new(mat2)})
-        );
+    let mat2 = materials::Metal{albedo:DVec3::new(0.4, 0.2, 0.1), fuzz:1.0};
+    /*world.push(
+        Box::new(Sphere{center:DVec3::new(-4.0, 1.0, 0.0), radius:1.0, mat:Box::new(mat2)})
+    );*/
+    let mut suzanne = Mesh::new(
+        load_mesh("D:\\rust-projects\\ray_tracing\\suzanne.obj"), Box::new(mat2)
+    );
+    suzanne.transform(DVec3::new(1.0, 0.5, -1.0), DRotor3::from_euler_angles(0.0, -PI / 4.0, -PI / 4.0));
+    world.push(Box::new(suzanne));
 
-        let mat3 = materials::Metal{albedo:DVec3::new(0.7, 0.6, 0.5), fuzz: 0.0};
-        world.push(
-            Box::new(Sphere{center:DVec3::new(4.0, 1.0, 0.0), radius:1.0, mat:Box::new(mat3)})
-        );
+    /*let mat3 = materials::Metal{albedo:DVec3::new(0.7, 0.6, 0.5), fuzz: 0.0};
+    world.push(
+        Box::new(Sphere{center:DVec3::new(4.0, 1.0, 0.0), radius:1.0, mat:Box::new(mat3)})
+    );*/
 
     let camera = Camera{width: WIDTH, height:HEIGHT, samples:20, max_depth:10, vfov:20.0};
 
     let lookfrom = DVec3::new(13.0, 2.0, 3.0);
-    let lookat = DVec3::new(0.0, 0.0, -1.0);
+    let lookat = DVec3::new(0.0, 0.5, -1.0);
     let vup = DVec3::new(0.0, 1.0, 0.0);
 
     let array: Array3<f32> = camera.render(world, lookfrom, lookat, vup, 0.6, 10.0);
