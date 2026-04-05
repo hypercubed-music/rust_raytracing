@@ -24,10 +24,10 @@ impl Ray {
 
 #[derive(Clone)]
 pub struct RayHit {
-    pub p: DVec3,
+    pub hit_point: DVec3,
     pub normal: DVec3,
     pub mat: Box<dyn Material + Sync>,
-    pub t: f64,
+    pub hit_time: f64,
     pub front: bool
 }
 
@@ -40,6 +40,7 @@ impl RayHit {
 
 pub trait Hittable {
     fn hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64) -> Option<RayHit>;
+    fn bounding_box_hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64) -> bool;
 }
 
 pub type HittableList =  Vec<Box<dyn Hittable + Sync + Send>>;
@@ -49,8 +50,9 @@ fn get_world_hit(r: &Ray, ray_tmin: f64, ray_tmax: f64, world:&HittableList) -> 
     let mut closest_rec: Option<RayHit> = None;
 
     for obj in world {
+        if !obj.bounding_box_hit(r, ray_tmin, closest_so_far) {continue};
         if let Some(rec) = obj.hit(r, ray_tmin, closest_so_far)  {
-            closest_so_far = rec.t;
+            closest_so_far = rec.hit_time;
             closest_rec = Some(rec);
         }
     }
@@ -85,8 +87,8 @@ impl Hittable for Sphere {
         let outward_normal = (p - self.center) / self.radius;
  
         let mut rec = RayHit {
-            t: root,
-            p,
+            hit_time: root,
+            hit_point: p,
             mat: self.mat.clone(),
             normal: outward_normal,
             front: true
@@ -96,6 +98,28 @@ impl Hittable for Sphere {
 
         Some(rec)
     }
+
+    fn bounding_box_hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64) -> bool {
+        let oc = r.origin - self.center;
+        let a = r.direction.mag_sq();
+        let half_b = oc.dot(r.direction);
+        let c = oc.mag_sq() - self.radius * self.radius;
+        let disc = half_b * half_b - a * c;
+        if disc < 0.0 { return false};
+
+        let sqrtd = disc.sqrt();
+        let mut root = (-half_b - sqrtd) / a;
+        if root <= ray_tmin || ray_tmax <= root {
+            root = (-half_b + sqrtd) / a;
+            if root <= ray_tmin || ray_tmax <= root {return false};
+        }
+        true
+    }
+}
+
+pub struct BoundingBox {
+    pub min: DVec3,
+    pub max: DVec3
 }
 
 pub struct Mesh {
@@ -103,7 +127,22 @@ pub struct Mesh {
     pub mat: Box<dyn Material + Sync + Send>,
     pub position: DVec3,
     pub rotation: DRotor3,
-    pub transformed_tris: Vec<MeshTriangle>
+    pub transformed_tris: Vec<MeshTriangle>,
+    pub bounding_box: BoundingBox
+}
+
+fn calcuate_bounding_box(tris: Vec<MeshTriangle>) -> BoundingBox {
+    let mut min = DVec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut max = DVec3::new(-f64::INFINITY, -f64::INFINITY, -f64::INFINITY);
+    for tri in tris.iter() {
+        min.x = min.x.min(tri.pos1.x).min(tri.pos2.x).min(tri.pos3.x);
+        min.y = min.y.min(tri.pos1.y).min(tri.pos2.y).min(tri.pos3.y);
+        min.z = min.z.min(tri.pos1.z).min(tri.pos2.z).min(tri.pos3.z);
+        max.x = max.x.max(tri.pos1.x).max(tri.pos2.x).max(tri.pos3.x);
+        max.y = max.y.max(tri.pos1.y).max(tri.pos2.y).max(tri.pos3.y);
+        max.z = max.z.max(tri.pos1.z).max(tri.pos2.z).max(tri.pos3.z);
+    }
+    BoundingBox{min, max}
 }
 
 impl Mesh {
@@ -113,7 +152,8 @@ impl Mesh {
             mat, 
             position: DVec3::zero(),
             rotation: DRotor3::identity(),
-            transformed_tris: tris
+            transformed_tris: tris.clone(),
+            bounding_box: calcuate_bounding_box(tris)
         }
     }
 
@@ -134,7 +174,13 @@ impl Mesh {
             transformed_tri_list.push(new_tri);
         }
         self.transformed_tris = transformed_tri_list;
+        self.bounding_box = calcuate_bounding_box(self.transformed_tris.clone());
     }   
+}
+
+#[derive(PartialEq)]
+enum bbPosition {
+    Left, Middle, Right
 }
 
 impl Hittable for Mesh {
@@ -164,15 +210,15 @@ impl Hittable for Mesh {
 
             if det >= 1e-6 && dst >= 0.0 && u >= 0.0 && v >= 0.0 && w >= 0.0 {
                 let hit = RayHit{
-                    p: r.origin + r.direction * dst,
+                    hit_point: r.origin + r.direction * dst,
                     mat: self.mat.clone(),
                     normal: (tri.norm1 * w + tri.norm2 * u + tri.norm3 * v).normalized(),
-                    t: dst,
+                    hit_time: dst,
                     front: true
                 };
                 if let Some(other_hit) = current_hit.clone() {
                     // compare distances
-                    if dst < other_hit.t {
+                    if dst < other_hit.hit_time {
                         current_hit = Some(hit);
                     }
                 } else {
@@ -180,7 +226,58 @@ impl Hittable for Mesh {
                 }
             }
         }
-        return current_hit;
+        current_hit
+    }
+
+    fn bounding_box_hit(&self, r: &Ray, ray_tmin: f64, ray_tmax: f64) -> bool {
+        // fast ray-aabb intersection by andrew woo
+        let mut inside = true;
+        let mut quadrant = [ const { bbPosition::Middle }; 3];
+        let mut which_plane = 0;
+        let mut max_t = DVec3::new(0.0, 0.0, 0.0);
+        let mut candidate_plane = DVec3::new(0.0, 0.0, 0.0);
+
+        for i in 0..3 {
+            if r.origin[i] < self.bounding_box.min[i] {
+                quadrant[i] = bbPosition::Left; // LEFT
+                candidate_plane[i] = self.bounding_box.min[i];
+                inside = false;
+            } else if r.origin[i] > self.bounding_box.max[i] {
+                quadrant[i] = bbPosition::Right; // RIGHT
+                candidate_plane[i] = self.bounding_box.max[i];
+                inside = false;
+            } else {
+                quadrant[i] = bbPosition::Middle; // MIDDLE
+            }
+        }
+
+        if (inside) {return true}
+
+        for i in 0..3 {
+            if quadrant[i] != bbPosition::Middle && r.direction[i] != 0.0 {
+                max_t[i] = (candidate_plane[i] - r.origin[i]) / r.direction[i];
+            } else {
+                max_t[i] = -1.0;
+            }
+        }
+
+        for i in 1..3 {
+            if max_t[i] > max_t[which_plane] {
+                which_plane = i;
+            }
+        }
+
+        if max_t[which_plane] < 0.0 {return false}
+        for i in 0..3 {
+            if which_plane != i {
+                let coord = r.origin[i] + max_t[which_plane] * r.direction[i];
+                if coord < self.bounding_box.min[i] || coord > self.bounding_box.max[i] {
+                    return false;
+                }
+            }
+        }
+
+        true
     }
 }
 
@@ -198,13 +295,13 @@ pub fn unit_samp() -> DVec3 {
 
 fn unit_hemi_samp(normal: DVec3) -> DVec3 {
     let v = unit_samp();
-    return if v.dot(normal) > 0.0 {v} else {-v};
+    if v.dot(normal) > 0.0 {v} else {-v}
 }
 
 fn environment_light(ray:Ray) -> DVec3 {
     let unit_direction = ray.direction.normalized();
     let a = 0.5 * (unit_direction.y + 1.0);
-    let sky_gradient = (1.0 - a) * DVec3::new(0.03, 0.02, 0.20) + a * DVec3::new(0.0, 0.0, 0.0);
+    let sky_gradient = (1.0 - a) * DVec3::new(0.68, 0.98, 1.00) + a * DVec3::new(0.5, 0.66, 1.0);
     
     let sun = ray.direction.dot(DVec3::new(0.5, 0.5, 0.0)).max(0.0).powf(10.0) * 1.0;
     //sky_gradient + DVec3::one() * sun

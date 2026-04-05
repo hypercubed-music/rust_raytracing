@@ -44,7 +44,7 @@ impl Material for Lambertian {
             scatter_direction = rec.normal;
         }
 
-        let scatter_ray = Ray::new(rec.p, scatter_direction, self.albedo * r_in.color);
+        let scatter_ray = Ray::new(rec.hit_point, scatter_direction, self.albedo * r_in.color);
         Some(scatter_ray)
     }
 }
@@ -59,7 +59,7 @@ impl Material for Metal {
     fn scatter(&self, r_in: &Ray, rec:&RayHit) -> Option<Ray> {
         let reflected = reflect(r_in.direction.normalized(), rec.normal);
         let color = r_in.color * self.albedo;
-        let scattered = Ray::new(rec.p, reflected + self.fuzz * unit_samp(), color);
+        let scattered = Ray::new(rec.hit_point, reflected + self.fuzz * unit_samp(), color);
         if scattered.direction.dot(rec.normal) > 0.0 {Some(scattered)} else {None}
     }
 }
@@ -86,7 +86,7 @@ impl Material for Dielectric {
             refract(unit_direction, rec.normal, refr_ratio)
         };
 
-        let scattered = Ray::new(rec.p, direction, r_in.color * attenuation);
+        let scattered = Ray::new(rec.hit_point, direction, r_in.color * attenuation);
         
         Some(scattered)
     }
@@ -101,7 +101,7 @@ pub struct Emissive {
 impl Material for Emissive {
     fn scatter(&self, r_in: &Ray, rec: &RayHit) -> Option<Ray> {
         let color = self.color * self.strength;
-        let mut scattered = Ray::new(rec.p, rec.normal, color);
+        let mut scattered = Ray::new(rec.hit_point, rec.normal, color);
         scattered.emissive = true;
         Some(scattered)
     }
